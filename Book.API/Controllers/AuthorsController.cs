@@ -4,6 +4,8 @@ using Book.API.Data;
 using Book.API.Dtos.Author;
 using AutoMapper;
 using Book.API.Static;
+using Book.API.Dtos.Book;
+using AutoMapper.QueryableExtensions;
 
 namespace Book.API.Controllers
 {
@@ -11,138 +13,119 @@ namespace Book.API.Controllers
     [ApiController]
     public class AuthorsController : ControllerBase
     {
-        private readonly BookContext _context;
-        private IMapper _mapper;
-        private readonly ILogger<AuthorsController> _logger;
-        public AuthorsController(BookContext context, IMapper mapper, ILogger<AuthorsController> logger)
+        [Route("api/[controller]")]
+        [ApiController]
+        public class BooksController : ControllerBase
         {
-            _context = context;
-            _mapper = mapper;
-            _logger = logger;
-        }
+            private readonly BookContext _context;
+            private readonly IMapper mapper;
 
-        // GET: api/Authors
-        [HttpGet]
-        public async Task<ActionResult<IEnumerable<Author>>> GetAuthors()
-        {
-            try
+            public BooksController(BookContext context, IMapper mapper)
             {
-                var authors = await _context.Authors.ToListAsync();
-                var authorDtos = _mapper.Map<IEnumerable<AuthorReadOnlyDto>>(authors);
-                return Ok(authorDtos);
-            }
-            catch (Exception ex)
-            {
-                //logger.LogError(ex, $"Error Performing GET in {nameof(GetAuthors)}");
-                return StatusCode(500, Messages.Error500Message);
-            }
-        }
-
-        // GET: api/Authors/5
-        [HttpGet("{id}")]
-        public async Task<ActionResult<Author>> GetAuthor(int id)
-        {
-            try
-            {
-                var author = await _context.Authors.FindAsync(id);
-
-                if (author == null)
-                {
-                    _logger.LogWarning($"Record Not Found: {nameof(GetAuthor)} - ID: {id}");
-                    return NotFound();
-                }
-
-                var authorDto = _mapper.Map<AuthorReadOnlyDto>(author);
-                return Ok(authorDto);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, $"Error Performing GET in {nameof(GetAuthors)}");
-                return StatusCode(500, Messages.Error500Message);
-            }
-        }
-
-        // PUT: api/Authors/5
-        // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-        [HttpPut("{id}")]
-        public async Task<IActionResult> PutAuthor(int id, AuthorUpdateDto authorDto)
-        {
-            if (id != authorDto.Id)
-            {
-                _logger.LogWarning($"Update ID invalid in {nameof(PutAuthor)} - ID: {id}");
-                return BadRequest();
+                _context = context;
+                this.mapper = mapper;
             }
 
-            var author = await _context.Authors.FindAsync(id);
-
-            if (author == null)
+            // GET: api/Books
+            [HttpGet]
+            public async Task<ActionResult<IEnumerable<BookReadOnlyDto>>> GetBooks()
             {
-                _logger.LogWarning($"{nameof(Author)} record not found in {nameof(PutAuthor)} - ID: {id}");
-                return NotFound();
+                var bookDtos = await _context.Books
+                    .Include(q => q.Author)
+                    .ProjectTo<BookReadOnlyDto>(mapper.ConfigurationProvider)
+                    .ToListAsync();
+                return Ok(bookDtos);
             }
 
-            _mapper.Map(authorDto, author);
-            _context.Entry(author).State = EntityState.Modified;
+            // GET: api/Books/5
+            [HttpGet("{id}")]
+            public async Task<ActionResult<BookDetailsDto>> GetBook(int id)
+            {
+                var book = await _context.Books
+                    .Include(q => q.Author)
+                    .ProjectTo<BookDetailsDto>(mapper.ConfigurationProvider)
+                    .FirstOrDefaultAsync(q => q.Id == id);
 
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException ex)
-            {
-                if (!await AuthorExists(id))
+                if (book == null)
                 {
                     return NotFound();
                 }
-                else
-                {
-                    _logger.LogError(ex, $"Error Performing GET in {nameof(PutAuthor)}");
-                    return StatusCode(500, Messages.Error500Message);
-                }
+
+                return book;
             }
 
-            return NoContent();
-        }
-
-        // POST: api/Authors
-        // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
-        [HttpPost]
-        public async Task<ActionResult<Author>> PostAuthor(AuthorCreateDto authorDto)
-        {
-            try
+            // PUT: api/Books/5
+            // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
+            [HttpPut("{id}")]
+            public async Task<IActionResult> PutBook(int id, BookUpdateDto bookDto)
             {
-                var author = _mapper.Map<Author>(authorDto);
-                await _context.Authors.AddAsync(author);
+
+                if (id != bookDto.Id)
+                {
+                    return BadRequest();
+                }
+
+                var book = await _context.Books.FindAsync(id);
+
+                if (book == null)
+                {
+                    return NotFound();
+                }
+
+                mapper.Map(bookDto, book);
+                _context.Entry(book).State = EntityState.Modified;
+
+                try
+                {
+                    await _context.SaveChangesAsync();
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    if (!await BookExistsAsync(id))
+                    {
+                        return NotFound();
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
+
+                return NoContent();
+            }
+
+            // POST: api/Books
+            // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
+            [HttpPost]
+            public async Task<ActionResult<BookCreateDto>> PostBook(BookCreateDto bookDto)
+            {
+                var book = mapper.Map<Data.Book>(bookDto);
+                _context.Books.Add(book);
                 await _context.SaveChangesAsync();
 
-                return CreatedAtAction(nameof(GetAuthor), new { id = author.Id }, author);
+                return CreatedAtAction(nameof(GetBook), new { id = book.Id }, book);
             }
-            catch (Exception ex)
+
+            // DELETE: api/Books/5
+            [HttpDelete("{id}")]
+            public async Task<IActionResult> DeleteBook(int id)
             {
-                _logger.LogError(ex, $"Error Performing POST in {nameof(PostAuthor)}", authorDto);
-                return StatusCode(500, Messages.Error500Message);
-            }
-        }
+                var book = await _context.Books.FindAsync(id);
+                if (book == null)
+                {
+                    return NotFound();
+                }
 
-        // DELETE: api/Authors/5
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteAuthor(int id)
-        {
-            var author = await _context.Authors.FindAsync(id);
-            if (author == null)
+                _context.Books.Remove(book);
+                await _context.SaveChangesAsync();
+
+                return NoContent();
+            }
+
+            private async Task<bool> BookExistsAsync(int id)
             {
-                return NotFound();
+                return await _context.Books.AnyAsync(e => e.Id == id);
             }
-
-            _context.Authors.Remove(author);
-            await _context.SaveChangesAsync();
-
-            return NoContent();
-        }
-
-        private async Task<bool> AuthorExists(int id)
-        {
-            return await _context.Authors.AnyAsync(e => e.Id == id);
         }
     }
 }
